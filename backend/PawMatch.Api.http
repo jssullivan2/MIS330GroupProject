@@ -1,0 +1,84 @@
+@PawMatch.Api_HostAddress = http://localhost:5102
+
+GET {{PawMatch.Api_HostAddress}}/api/pets
+Accept: application/json
+
+###
+
+GET {{PawMatch.Api_HostAddress}}/api/shelters
+Accept: application/json
+
+###
+
+GET {{PawMatch.Api_HostAddress}}/api/stats/summary
+Accept: application/json
+
+###
+
+POST {{PawMatch.Api_HostAddress}}/api/users
+Content-Type: application/json
+
+{
+  "userName": "New Adopter",
+  "userEmail": "new.adopter@example.com",
+  "password": "Secret123",
+  "typePreference": "Dog"
+}
+
+###
+
+POST {{PawMatch.Api_HostAddress}}/api/auth/adopter
+Content-Type: application/json
+
+{
+  "userEmail": "alex.j@example.com",
+  "password": "Pass1234"
+}
+
+###
+
+POST {{PawMatch.Api_HostAddress}}/api/auth/staff
+Content-Type: application/json
+
+{
+  "employeeName": "Jamie Lee",
+  "password": "emp-hash-1"
+}
+
+###
+
+POST {{PawMatch.Api_HostAddress}}/api/pets/1/adopt
+Content-Type: application/json
+
+{
+  "userId": 1
+}
+
+###
+
+### Staff API (use EmployeeID from login / seed, e.g. Jamie Lee = 1)
+GET {{PawMatch.Api_HostAddress}}/api/staff/users
+Accept: application/json
+X-Staff-Employee-Id: 1
+
+###
+
+GET {{PawMatch.Api_HostAddress}}/api/staff/pets
+Accept: application/json
+X-Staff-Employee-Id: 1
+
+###
+
+POST {{PawMatch.Api_HostAddress}}/api/staff/pets
+Content-Type: application/json
+X-Staff-Employee-Id: 1
+
+{
+  "petName": "Staff Test Pet",
+  "petBreed": "Mix",
+  "petType": "Dog",
+  "shelterId": 1,
+  "employeeId": 1
+}
+
+###
