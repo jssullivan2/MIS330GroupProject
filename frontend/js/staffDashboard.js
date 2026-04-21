@@ -300,10 +300,21 @@ export function buildStaffDashboard(state, h) {
     el('option', { value: 'Cat' }, ['Cat']),
   ]);
   const petFormShelter = el('select', { class: 'form-select', id: 'staffPetShelter' });
-  petFormShelter.appendChild(el('option', { value: '' }, ['(none)']));
-  shelters.forEach((s) => {
-    petFormShelter.appendChild(el('option', { value: String(s.id) }, [`#${s.id} ${s.name}`]));
-  });
+  const myShelterId = state.currentEmployee.shelterId;
+  if (myShelterId != null) {
+    const s = shelters.find((x) => x.id === myShelterId);
+    if (s) {
+      petFormShelter.appendChild(el('option', { value: String(s.id) }, [`#${s.id} ${s.name}`]));
+    } else {
+      petFormShelter.appendChild(el('option', { value: '' }, ['Shelter not in directory']));
+    }
+    petFormShelter.disabled = true;
+  } else {
+    petFormShelter.appendChild(
+      el('option', { value: '', disabled: 'true' }, ['No shelter on your account — cannot manage pets']),
+    );
+    petFormShelter.disabled = true;
+  }
 
   const petFormFeedback = el('div', { class: 'text-danger small', id: 'staffPetFormFb' });
 
@@ -312,7 +323,7 @@ export function buildStaffDashboard(state, h) {
     petFormName.value = '';
     petFormBreed.value = '';
     petFormType.value = 'Dog';
-    petFormShelter.value = '';
+    petFormShelter.value = myShelterId != null ? String(myShelterId) : '';
     petFormFeedback.textContent = '';
   };
 
@@ -336,7 +347,11 @@ export function buildStaffDashboard(state, h) {
     }
     const breed = petFormBreed.value.trim() || null;
     const petType = petFormType.value;
-    const sid = petFormShelter.value ? Number(petFormShelter.value) : null;
+    if (myShelterId == null) {
+      petFormFeedback.textContent = 'Your account has no shelter; you cannot save pets.';
+      return;
+    }
+    const sid = myShelterId;
     const body = {
       petName: name,
       petBreed: breed,
@@ -443,7 +458,11 @@ export function buildStaffDashboard(state, h) {
     id: 'staff-pane-pets',
     role: 'tabpanel',
   }, [
-    el('p', { class: 'text-secondary' }, ['Create, edit, or remove pets in MySQL. Search and sort the table below.']),
+    el('p', { class: 'text-secondary' }, [
+      'Create, edit, or remove pets for ',
+      el('strong', {}, ['your shelter only']),
+      '. Search and sort the table below.',
+    ]),
     petFormCard,
     el('div', { class: 'row g-3 mb-3' }, [
       el('div', { class: 'col-md-6' }, [

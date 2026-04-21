@@ -824,18 +824,6 @@ function viewPets() {
           ' table, then refresh.',
         ])
       : null,
-    el('p', { class: 'text-secondary mb-4' }, [
-      'Submitting a request creates a row in ',
-      el('code', {}, ['AdoptionApplication']),
-      ' with ',
-      el('code', {}, ['IsAdopted = 0']),
-      ' (pending). Shelter staff approves by setting ',
-      el('code', {}, ['IsAdopted = 1']),
-      '. Sign in as an ',
-      el('strong', {}, ['adopter']),
-      ' (User) to apply; staff use the staff dashboard to review applications. ',
-      'Pets that are already adopted are not shown.',
-    ]),
     el('div', { class: 'row g-3 mb-4' }, [
       el('div', { class: 'col-md-4' }, [
         el('label', { class: 'form-label small' }, ['Species']),

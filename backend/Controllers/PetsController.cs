@@ -49,14 +49,15 @@ public sealed class PetsController : ControllerBase
               {PetQueryFragments.SelectPhotoUrlColumn},
               CASE
                 WHEN @viewerUserId IS NULL THEN CAST(NULL AS CHAR(20))
-                ELSE (
-                  SELECT CASE WHEN a.IsAdopted THEN 'adopted' ELSE 'pending' END
-                  FROM AdoptionApplication a
-                  WHERE a.PetID = p.PetID AND a.UserID = @viewerUserId
-                  LIMIT 1
-                )
+                WHEN viewerApp.UserID IS NULL THEN CAST(NULL AS CHAR(20))
+                WHEN viewerApp.IsAdopted THEN 'adopted'
+                ELSE 'pending'
               END AS MyApplicationStatus
             FROM Pet p
+            LEFT JOIN AdoptionApplication viewerApp
+              ON viewerApp.PetID = p.PetID
+              AND @viewerUserId IS NOT NULL
+              AND viewerApp.UserID = @viewerUserId
             WHERE NOT EXISTS (
               SELECT 1 FROM AdoptionApplication ax
               WHERE ax.PetID = p.PetID AND ax.IsAdopted = TRUE
@@ -197,13 +198,14 @@ public sealed class PetsController : ControllerBase
                     ELSE 'Available'
                   END AS Status,
                   {PetQueryFragments.SelectPhotoUrlColumn},
-                  (
-                    SELECT CASE WHEN a.IsAdopted THEN 'adopted' ELSE 'pending' END
-                    FROM AdoptionApplication a
-                    WHERE a.PetID = p.PetID AND a.UserID = @userId
-                    LIMIT 1
-                  ) AS MyApplicationStatus
+                  CASE
+                    WHEN myApp.UserID IS NULL THEN CAST(NULL AS CHAR(20))
+                    WHEN myApp.IsAdopted THEN 'adopted'
+                    ELSE 'pending'
+                  END AS MyApplicationStatus
                 FROM Pet p
+                INNER JOIN AdoptionApplication myApp
+                  ON myApp.PetID = p.PetID AND myApp.UserID = @userId
                 WHERE p.PetID = @petId
                 """;
             await using var selCmd = new MySqlCommand(selectSql, conn);

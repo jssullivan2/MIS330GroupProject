@@ -59,6 +59,20 @@ public sealed class StaffController : ControllerBase
         return await cmd.ExecuteScalarAsync(cancellationToken) is not null;
     }
 
+    private static async Task<int?> GetEmployeeShelterIdAsync(
+        MySqlConnection conn,
+        int employeeId,
+        CancellationToken cancellationToken)
+    {
+        await using var cmd = new MySqlCommand(
+            "SELECT ShelterID FROM Employee WHERE EmployeeID = @id LIMIT 1", conn);
+        cmd.Parameters.AddWithValue("@id", employeeId);
+        var o = await cmd.ExecuteScalarAsync(cancellationToken);
+        if (o is null or DBNull)
+            return null;
+        return Convert.ToInt32(o);
+    }
+
     private async Task<ActionResult?> RequireStaffAsync(CancellationToken cancellationToken)
     {
         if (!TryGetStaffId(out var id))
@@ -160,6 +174,8 @@ public sealed class StaffController : ControllerBase
     {
         var auth = await RequireStaffAsync(cancellationToken);
         if (auth is not null) return auth;
+        if (!TryGetStaffId(out var listStaffId))
+            return Unauthorized("Missing or invalid X-Staff-Employee-Id header.");
 
         var sql = $"""
             SELECT
@@ -187,6 +203,10 @@ public sealed class StaffController : ControllerBase
               {PetQueryFragments.SelectPhotoUrlColumn},
               CAST(NULL AS CHAR(20)) AS MyApplicationStatus
             FROM Pet p
+            INNER JOIN Employee e ON e.EmployeeID = @empId
+            WHERE e.ShelterID IS NOT NULL
+              AND p.ShelterID IS NOT NULL
+              AND p.ShelterID = e.ShelterID
             ORDER BY p.PetID
             """;
 
@@ -195,6 +215,7 @@ public sealed class StaffController : ControllerBase
             await using var conn = _db.CreateConnection();
             await conn.OpenAsync(cancellationToken);
             await using var cmd = new MySqlCommand(sql, conn);
+            cmd.Parameters.AddWithValue("@empId", listStaffId);
             await using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
             var list = new List<PetDto>();
             while (await reader.ReadAsync(cancellationToken))
@@ -231,9 +252,10 @@ public sealed class StaffController : ControllerBase
 
         var auth = await RequireStaffAsync(cancellationToken);
         if (auth is not null) return auth;
-        TryGetStaffId(out var staffId);
+        if (!TryGetStaffId(out var createStaffId))
+            return Unauthorized("Missing or invalid X-Staff-Employee-Id header.");
 
-        var empId = body.EmployeeId ?? staffId;
+        var empId = body.EmployeeId ?? createStaffId;
         const string sql = """
             INSERT INTO Pet (PetName, PetBreed, PetType, ShelterID, EmployeeID)
             VALUES (@name, @breed, @type, @shelterId, @empId)
@@ -243,11 +265,21 @@ public sealed class StaffController : ControllerBase
         {
             await using var conn = _db.CreateConnection();
             await conn.OpenAsync(cancellationToken);
+            var myShelter = await GetEmployeeShelterIdAsync(conn, createStaffId, cancellationToken);
+            if (myShelter is null)
+                return Problem(
+                    detail: "Your employee record has no shelter assigned; you cannot create pet listings.",
+                    statusCode: StatusCodes.Status403Forbidden);
+            if (body.ShelterId.HasValue && body.ShelterId.Value != myShelter.Value)
+                return Problem(
+                    detail: "You can only create pets for your own shelter.",
+                    statusCode: StatusCodes.Status403Forbidden);
+
             await using var cmd = new MySqlCommand(sql, conn);
             cmd.Parameters.AddWithValue("@name", body.PetName.Trim());
             cmd.Parameters.AddWithValue("@breed", string.IsNullOrWhiteSpace(body.PetBreed) ? DBNull.Value : body.PetBreed.Trim());
             cmd.Parameters.AddWithValue("@type", body.PetType);
-            cmd.Parameters.AddWithValue("@shelterId", body.ShelterId.HasValue ? body.ShelterId.Value : DBNull.Value);
+            cmd.Parameters.AddWithValue("@shelterId", myShelter.Value);
             cmd.Parameters.AddWithValue("@empId", empId);
             await cmd.ExecuteNonQueryAsync(cancellationToken);
             return StatusCode(StatusCodes.Status201Created, new { id = (int)cmd.LastInsertedId });
@@ -267,8 +299,9 @@ public sealed class StaffController : ControllerBase
 
         var auth = await RequireStaffAsync(cancellationToken);
         if (auth is not null) return auth;
-        TryGetStaffId(out var staffId);
-        var empId = body.EmployeeId ?? staffId;
+        if (!TryGetStaffId(out var updateStaffId))
+            return Unauthorized("Missing or invalid X-Staff-Employee-Id header.");
+        var empId = body.EmployeeId ?? updateStaffId;
 
         const string sql = """
             UPDATE Pet SET
@@ -284,12 +317,33 @@ public sealed class StaffController : ControllerBase
         {
             await using var conn = _db.CreateConnection();
             await conn.OpenAsync(cancellationToken);
+            var myShelter = await GetEmployeeShelterIdAsync(conn, updateStaffId, cancellationToken);
+            if (myShelter is null)
+                return Problem(
+                    detail: "Your employee record has no shelter assigned; you cannot edit pet listings.",
+                    statusCode: StatusCodes.Status403Forbidden);
+            await using (var existsPet = new MySqlCommand("SELECT 1 FROM Pet WHERE PetID = @id LIMIT 1", conn))
+            {
+                existsPet.Parameters.AddWithValue("@id", petId);
+                if (await existsPet.ExecuteScalarAsync(cancellationToken) is null)
+                    return NotFound();
+            }
+
+            if (!await EmployeePetSameShelterAsync(conn, updateStaffId, petId, cancellationToken))
+                return Problem(
+                    detail: "You can only update pets from your shelter.",
+                    statusCode: StatusCodes.Status403Forbidden);
+            if (body.ShelterId.HasValue && body.ShelterId.Value != myShelter.Value)
+                return Problem(
+                    detail: "You cannot move a pet to another shelter.",
+                    statusCode: StatusCodes.Status403Forbidden);
+
             await using var cmd = new MySqlCommand(sql, conn);
             cmd.Parameters.AddWithValue("@petId", petId);
             cmd.Parameters.AddWithValue("@name", body.PetName.Trim());
             cmd.Parameters.AddWithValue("@breed", string.IsNullOrWhiteSpace(body.PetBreed) ? DBNull.Value : body.PetBreed.Trim());
             cmd.Parameters.AddWithValue("@type", body.PetType);
-            cmd.Parameters.AddWithValue("@shelterId", body.ShelterId.HasValue ? body.ShelterId.Value : DBNull.Value);
+            cmd.Parameters.AddWithValue("@shelterId", myShelter.Value);
             cmd.Parameters.AddWithValue("@empId", empId);
             var n = await cmd.ExecuteNonQueryAsync(cancellationToken);
             return n == 0 ? NotFound() : NoContent();
@@ -306,11 +360,25 @@ public sealed class StaffController : ControllerBase
     {
         var auth = await RequireStaffAsync(cancellationToken);
         if (auth is not null) return auth;
+        if (!TryGetStaffId(out var deleteStaffId))
+            return Unauthorized("Missing or invalid X-Staff-Employee-Id header.");
 
         try
         {
             await using var conn = _db.CreateConnection();
             await conn.OpenAsync(cancellationToken);
+            await using (var existsPet = new MySqlCommand("SELECT 1 FROM Pet WHERE PetID = @id LIMIT 1", conn))
+            {
+                existsPet.Parameters.AddWithValue("@id", petId);
+                if (await existsPet.ExecuteScalarAsync(cancellationToken) is null)
+                    return NotFound();
+            }
+
+            if (!await EmployeePetSameShelterAsync(conn, deleteStaffId, petId, cancellationToken))
+                return Problem(
+                    detail: "You can only delete pets from your shelter.",
+                    statusCode: StatusCodes.Status403Forbidden);
+
             await using var tx = await conn.BeginTransactionAsync(cancellationToken);
             await using (var delA = new MySqlCommand("DELETE FROM AdoptionApplication WHERE PetID = @petId", conn, (MySqlTransaction)tx))
             {

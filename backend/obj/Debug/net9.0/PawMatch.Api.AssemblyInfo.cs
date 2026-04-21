@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("PawMatch.Api")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+52c63be75854a88cc1a7d55ade6c85a805ffadfa")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+98669b8ab53b325ec1d366daaf9922bb65d8ab47")]
 [assembly: System.Reflection.AssemblyProductAttribute("PawMatch.Api")]
 [assembly: System.Reflection.AssemblyTitleAttribute("PawMatch.Api")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]
