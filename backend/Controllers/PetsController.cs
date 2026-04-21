@@ -18,9 +18,10 @@ public sealed class PetsController : ControllerBase
         _logger = logger;
     }
 
-    /// <summary>Returns rows from <c>Pet</c> only (no <c>Shelter</c> join). Status uses <c>AdoptionApplication</c> for adoption workflow.</summary>
+    /// <summary>Adopter-facing list: pets without a completed adoption (<c>IsAdopted</c> true). Status uses <c>AdoptionApplication</c>.</summary>
+    /// <param name="userId">Optional adopter id; when set, each pet includes <c>myApplicationStatus</c> (<c>pending</c> = IsAdopted 0, <c>adopted</c> = IsAdopted 1).</param>
     [HttpGet]
-    public async Task<ActionResult<IReadOnlyList<PetDto>>> GetAll(CancellationToken cancellationToken)
+    public async Task<ActionResult<IReadOnlyList<PetDto>>> GetAll([FromQuery] int? userId, CancellationToken cancellationToken)
     {
         var sql = $"""
             SELECT
@@ -45,8 +46,21 @@ public sealed class PetsController : ControllerBase
                 ) THEN 'Pending'
                 ELSE 'Available'
               END AS Status,
-              {PetQueryFragments.SelectPhotoUrlColumn}
+              {PetQueryFragments.SelectPhotoUrlColumn},
+              CASE
+                WHEN @viewerUserId IS NULL THEN CAST(NULL AS CHAR(20))
+                ELSE (
+                  SELECT CASE WHEN a.IsAdopted THEN 'adopted' ELSE 'pending' END
+                  FROM AdoptionApplication a
+                  WHERE a.PetID = p.PetID AND a.UserID = @viewerUserId
+                  LIMIT 1
+                )
+              END AS MyApplicationStatus
             FROM Pet p
+            WHERE NOT EXISTS (
+              SELECT 1 FROM AdoptionApplication ax
+              WHERE ax.PetID = p.PetID AND ax.IsAdopted = TRUE
+            )
             ORDER BY p.PetID
             """;
 
@@ -55,11 +69,14 @@ public sealed class PetsController : ControllerBase
             await using var conn = _db.CreateConnection();
             await conn.OpenAsync(cancellationToken);
             await using var cmd = new MySqlCommand(sql, conn);
+            var viewer = userId is > 0 ? userId.Value : (object?)DBNull.Value;
+            cmd.Parameters.AddWithValue("@viewerUserId", viewer);
             await using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
             var list = new List<PetDto>();
             while (await reader.ReadAsync(cancellationToken))
             {
                 var photoOrd = reader.GetOrdinal("PhotoUrl");
+                var myAppOrd = reader.GetOrdinal("MyApplicationStatus");
                 list.Add(new PetDto(
                     reader.GetInt32(reader.GetOrdinal("Id")),
                     reader.GetString(reader.GetOrdinal("Name")),
@@ -69,7 +86,8 @@ public sealed class PetsController : ControllerBase
                     reader.GetInt32(reader.GetOrdinal("ShelterId")),
                     reader.GetString(reader.GetOrdinal("ShelterName")),
                     reader.GetString(reader.GetOrdinal("Status")),
-                    reader.IsDBNull(photoOrd) ? null : reader.GetString(photoOrd)));
+                    reader.IsDBNull(photoOrd) ? null : reader.GetString(photoOrd),
+                    reader.IsDBNull(myAppOrd) ? null : reader.GetString(myAppOrd)));
             }
 
             return Ok(list);
@@ -81,7 +99,10 @@ public sealed class PetsController : ControllerBase
         }
     }
 
-    /// <summary>Sets <c>AdoptionApplication.IsAdopted</c> for this user/pet; pet must not already be adopted.</summary>
+    /// <summary>
+    /// Submits an adoption request: inserts or keeps <c>AdoptionApplication</c> with <c>IsAdopted = FALSE</c> (0).
+    /// Shelter staff approves by setting <c>IsAdopted = TRUE</c> (1). Pet must not already be adopted by anyone.
+    /// </summary>
     [HttpPost("{petId:int}/adopt")]
     public async Task<ActionResult<PetDto>> Adopt(int petId, [FromBody] AdoptPetRequest body, CancellationToken cancellationToken)
     {
@@ -120,14 +141,28 @@ public sealed class PetsController : ControllerBase
                 adoptedCmd.Parameters.AddWithValue("@petId", petId);
                 var taken = Convert.ToInt32(await adoptedCmd.ExecuteScalarAsync(cancellationToken));
                 if (taken > 0)
-                    return Conflict("This pet is not available for adoption.");
+                    return Conflict("This pet is already adopted. Staff cannot accept new applications for it.");
+            }
+
+            const string mineSql = """
+                SELECT IsAdopted FROM AdoptionApplication
+                WHERE UserID = @userId AND PetID = @petId
+                LIMIT 1
+                """;
+            await using (var mineCmd = new MySqlCommand(mineSql, conn))
+            {
+                mineCmd.Parameters.AddWithValue("@userId", body.UserId);
+                mineCmd.Parameters.AddWithValue("@petId", petId);
+                var mine = await mineCmd.ExecuteScalarAsync(cancellationToken);
+                if (mine is bool already && already)
+                    return Conflict("You have already completed adoption for this pet.");
             }
 
             await using var tx = await conn.BeginTransactionAsync(cancellationToken);
             const string upsertSql = """
                 INSERT INTO AdoptionApplication (UserID, PetID, IsAdopted)
-                VALUES (@userId, @petId, TRUE)
-                ON DUPLICATE KEY UPDATE IsAdopted = TRUE
+                VALUES (@userId, @petId, FALSE)
+                ON DUPLICATE KEY UPDATE IsAdopted = IF(IsAdopted, TRUE, FALSE)
                 """;
             await using (var upCmd = new MySqlCommand(upsertSql, conn, (MySqlTransaction)tx))
             {
@@ -161,17 +196,25 @@ public sealed class PetsController : ControllerBase
                     ) THEN 'Pending'
                     ELSE 'Available'
                   END AS Status,
-                  {PetQueryFragments.SelectPhotoUrlColumn}
+                  {PetQueryFragments.SelectPhotoUrlColumn},
+                  (
+                    SELECT CASE WHEN a.IsAdopted THEN 'adopted' ELSE 'pending' END
+                    FROM AdoptionApplication a
+                    WHERE a.PetID = p.PetID AND a.UserID = @userId
+                    LIMIT 1
+                  ) AS MyApplicationStatus
                 FROM Pet p
                 WHERE p.PetID = @petId
                 """;
             await using var selCmd = new MySqlCommand(selectSql, conn);
             selCmd.Parameters.AddWithValue("@petId", petId);
+            selCmd.Parameters.AddWithValue("@userId", body.UserId);
             await using var reader = await selCmd.ExecuteReaderAsync(cancellationToken);
             if (!await reader.ReadAsync(cancellationToken))
                 return NotFound();
 
             var photoOrd = reader.GetOrdinal("PhotoUrl");
+            var myAppOrd = reader.GetOrdinal("MyApplicationStatus");
             var dto = new PetDto(
                 reader.GetInt32(reader.GetOrdinal("Id")),
                 reader.GetString(reader.GetOrdinal("Name")),
@@ -181,13 +224,14 @@ public sealed class PetsController : ControllerBase
                 reader.GetInt32(reader.GetOrdinal("ShelterId")),
                 reader.GetString(reader.GetOrdinal("ShelterName")),
                 reader.GetString(reader.GetOrdinal("Status")),
-                reader.IsDBNull(photoOrd) ? null : reader.GetString(photoOrd));
+                reader.IsDBNull(photoOrd) ? null : reader.GetString(photoOrd),
+                reader.IsDBNull(myAppOrd) ? null : reader.GetString(myAppOrd));
 
             return Ok(dto);
         }
         catch (MySqlException ex)
         {
-            _logger.LogError(ex, "Database error adopting pet {PetId}", petId);
+            _logger.LogError(ex, "Database error submitting adoption request for pet {PetId}", petId);
             return Problem(detail: ex.Message, statusCode: StatusCodes.Status503ServiceUnavailable);
         }
     }

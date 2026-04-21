@@ -5,6 +5,12 @@ Accept: application/json
 
 ###
 
+# Optional userId: each pet includes myApplicationStatus (pending = IsAdopted 0, adopted = 1).
+GET {{PawMatch.Api_HostAddress}}/api/pets?userId=1
+Accept: application/json
+
+###
+
 GET {{PawMatch.Api_HostAddress}}/api/shelters
 Accept: application/json
 
@@ -47,6 +53,7 @@ Content-Type: application/json
 
 ###
 
+# Submits adoption request: AdoptionApplication with IsAdopted = 0 (staff sets 1 to approve).
 POST {{PawMatch.Api_HostAddress}}/api/pets/1/adopt
 Content-Type: application/json
 

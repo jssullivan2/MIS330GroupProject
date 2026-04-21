@@ -2,6 +2,12 @@ import { api } from './api.js';
 import { mockPets, mockShelters, mockSummary } from './mockData.js';
 import { buildStaffDashboard } from './staffDashboard.js';
 
+/** Adopter browse/home: do not list pets that are already adopted. */
+function adopterVisiblePets(pets) {
+  if (!Array.isArray(pets)) return [];
+  return pets.filter((p) => p.status !== 'Adopted');
+}
+
 const STORAGE_KEY = 'pawmatchUser';
 const STORAGE_KEY_EMPLOYEE = 'pawmatchEmployee';
 
@@ -27,7 +33,7 @@ function defaultStaffState() {
 
 const state = {
   route: 'home',
-  pets: [...mockPets],
+  pets: adopterVisiblePets([...mockPets]),
   shelters: [...mockShelters],
   summary: { ...mockSummary },
   petFilterSpecies: '',
@@ -100,7 +106,9 @@ function el(tag, attrs = {}, children = []) {
     if (k === 'class') node.className = v;
     else if (k === 'html') node.innerHTML = v;
     else if (k.startsWith('on') && typeof v === 'function') node.addEventListener(k.slice(2).toLowerCase(), v);
-    else if (v !== null && v !== undefined) node.setAttribute(k, v);
+    else if (k === 'disabled' && (node instanceof HTMLButtonElement || node instanceof HTMLInputElement || node instanceof HTMLSelectElement || node instanceof HTMLTextAreaElement)) {
+      node.disabled = Boolean(v);
+    } else if (v !== null && v !== undefined) node.setAttribute(k, v);
   });
   (Array.isArray(children) ? children : [children]).forEach((c) => {
     if (c == null) return;
@@ -122,14 +130,14 @@ async function loadData() {
   render();
   try {
     // Only pets are loaded from MySQL via the API. Shelters + dashboard summary stay local mock data.
-    const pets = await api.getPets();
-    state.pets = pets;
+    const pets = await api.getPets(state.currentUser?.id);
+    state.pets = adopterVisiblePets(pets);
     state.petsFromApi = true;
     state.shelters = [...mockShelters];
     state.summary = { ...mockSummary };
   } catch (e) {
     state.error = e.message || 'Failed to load data.';
-    state.pets = [...mockPets];
+    state.pets = adopterVisiblePets([...mockPets]);
     state.petsFromApi = false;
     state.shelters = [...mockShelters];
     state.summary = { ...mockSummary };
@@ -359,6 +367,7 @@ function setupAuthModals() {
       window.bootstrap.Modal.getOrCreateInstance(document.getElementById('pmUserLoginModal')).hide();
       setToast('success', 'Signed in as adopter.');
       render();
+      await loadData();
     } catch (err) {
       userFb.textContent = err.message || 'Sign in failed.';
     } finally {
@@ -436,7 +445,8 @@ function setupAuthModals() {
       window.bootstrap.Modal.getOrCreateInstance(document.getElementById('pmEmployeeLoginModal')).hide();
       setToast('success', 'Signed in as shelter staff. Adopter session was cleared.');
       navigate('staff');
-      loadStaffDashboard();
+      await loadData();
+      void loadStaffDashboard();
     } catch (err) {
       empFb.textContent = err.message || 'Staff sign in failed.';
     } finally {
@@ -482,7 +492,6 @@ function navBar() {
     { id: 'home', label: 'Home', icon: 'bi-house' },
     { id: 'pets', label: 'Browse pets', icon: 'bi-heart' },
     { id: 'shelters', label: 'Shelters', icon: 'bi-building' },
-    { id: 'analysis', label: 'Analysis (SQL)', icon: 'bi-graph-up' },
     ...(state.currentEmployee
       ? [{ id: 'staff', label: 'Staff dashboard', icon: 'bi-speedometer2' }]
       : []),
@@ -551,10 +560,11 @@ function navBar() {
       ]),
     ]));
     const signOut = el('a', { class: 'nav-link', href: '#' }, [el('i', { class: 'bi bi-box-arrow-right me-1' }), 'Adopter sign out']);
-    signOut.addEventListener('click', (e) => {
+    signOut.addEventListener('click', async (e) => {
       e.preventDefault();
       clearUserSession();
       render();
+      await loadData();
     });
     ul.appendChild(el('li', { class: 'nav-item' }, [signOut]));
   } else {
@@ -645,38 +655,77 @@ function statCards() {
   ));
 }
 
-function petCard(p) {
+function petStatusBadge(p) {
+  const global = p.status;
+  const tips = {
+    Available: 'No completed adoption yet (no row with IsAdopted = 1).',
+    Pending: 'Open adoption request(s): IsAdopted = 0 until staff approves.',
+    Adopted: 'This pet has an approved adoption (IsAdopted = 1).',
+  };
   const badgeClass =
-    p.status === 'Available' ? 'bg-success' : p.status === 'Pending' ? 'bg-warning text-dark' : 'bg-secondary';
+    global === 'Available' ? 'bg-success' : global === 'Pending' ? 'bg-warning text-dark' : 'bg-secondary';
+  const label =
+    global === 'Pending' ? 'Pending (0)' : global === 'Adopted' ? 'Adopted (1)' : global;
+  return el('span', {
+    class: `badge ${badgeClass}`,
+    title: tips[global] || '',
+  }, [label]);
+}
+
+function petCard(p) {
   const imgSrc = p.photoUrl || 'https://images.unsplash.com/photo-1450778869180-41d0601e046e?w=600';
+  const mine = p.myApplicationStatus;
+  const openForRequests = p.status === 'Available' || p.status === 'Pending';
 
   let actionBtn;
-  if (p.status === 'Available') {
-    if (state.currentUser) {
-      actionBtn = el('button', { type: 'button', class: 'btn btn-primary btn-sm mt-2' }, ['Complete adoption']);
-      actionBtn.addEventListener('click', async () => {
-        if (!window.confirm(`Adopt ${p.name}? This will set the pet to Adopted in MySQL.`)) return;
-        actionBtn.disabled = true;
-        try {
-          await api.adoptPet(p.id, state.currentUser.id);
-          setToast('success', `${p.name} is now marked adopted.`);
-          await loadData();
-        } catch (err) {
-          setToast('danger', err.message || 'Adoption failed. Is the API running?');
-          actionBtn.disabled = false;
-        }
-      });
-    } else if (state.currentEmployee) {
-      actionBtn = el('button', { type: 'button', class: 'btn btn-outline-secondary btn-sm mt-2' }, ['Adopter sign in to adopt']);
-      actionBtn.addEventListener('click', () => openUserLoginModal());
-    } else {
-      actionBtn = el('button', { type: 'button', class: 'btn btn-outline-primary btn-sm mt-2' }, ['Create adopter account']);
-      actionBtn.addEventListener('click', () => openRegisterModal());
-    }
+  if (p.status === 'Adopted' && mine !== 'adopted') {
+    actionBtn = el('button', { type: 'button', class: 'btn btn-outline-secondary btn-sm mt-2', disabled: true }, [
+      'Already adopted',
+    ]);
+  } else if (mine === 'adopted') {
+    actionBtn = el('button', { type: 'button', class: 'btn btn-success btn-sm mt-2', disabled: true }, [
+      'Your adoption approved',
+    ]);
+  } else if (mine === 'pending') {
+    actionBtn = el('button', { type: 'button', class: 'btn btn-outline-secondary btn-sm mt-2', disabled: true }, [
+      'Request submitted (awaiting approval)',
+    ]);
+  } else if (openForRequests && state.currentUser) {
+    actionBtn = el('button', { type: 'button', class: 'btn btn-primary btn-sm mt-2' }, ['Submit adoption request']);
+    actionBtn.addEventListener('click', async () => {
+      if (!window.confirm(
+        `Submit an adoption request for ${p.name}? This saves IsAdopted = 0 in AdoptionApplication; staff sets 1 when approved.`,
+      )) return;
+      actionBtn.disabled = true;
+      try {
+        await api.submitAdoptionRequest(p.id, state.currentUser.id);
+        setToast('success', `Request saved for ${p.name}. Await staff approval (IsAdopted → 1).`);
+        await loadData();
+      } catch (err) {
+        setToast('danger', err.message || 'Request failed. Is the API running?');
+        actionBtn.disabled = false;
+      }
+    });
+  } else if (openForRequests && state.currentEmployee) {
+    actionBtn = el('button', { type: 'button', class: 'btn btn-outline-secondary btn-sm mt-2' }, ['Adopter sign in to apply']);
+    actionBtn.addEventListener('click', () => openUserLoginModal());
+  } else if (openForRequests) {
+    actionBtn = el('button', { type: 'button', class: 'btn btn-outline-primary btn-sm mt-2' }, ['Create adopter account']);
+    actionBtn.addEventListener('click', () => openRegisterModal());
   } else {
-    const label = p.status === 'Adopted' ? 'Already adopted' : 'Not available to adopt';
-    actionBtn = el('button', { type: 'button', class: 'btn btn-outline-secondary btn-sm mt-2', disabled: true }, [label]);
+    actionBtn = el('button', { type: 'button', class: 'btn btn-outline-secondary btn-sm mt-2', disabled: true }, [
+      'Not available',
+    ]);
   }
+
+  const myNote =
+    state.currentUser && (mine === 'pending' || mine === 'adopted')
+      ? el('div', { class: 'small text-muted mt-1' }, [
+        mine === 'pending'
+          ? 'Your row: IsAdopted = 0 (pending).'
+          : 'Your row: IsAdopted = 1 (approved).',
+      ])
+      : null;
 
   return el('div', { class: 'col-md-6 col-lg-4' }, [
     el('div', { class: 'card card-pet border-0 shadow-sm h-100' }, [
@@ -684,7 +733,7 @@ function petCard(p) {
       el('div', { class: 'card-body d-flex flex-column' }, [
         el('div', { class: 'd-flex justify-content-between align-items-start mb-2' }, [
           el('h5', { class: 'card-title mb-0' }, [p.name]),
-          el('span', { class: `badge ${badgeClass}` }, [p.status]),
+          petStatusBadge(p),
         ]),
         el('p', { class: 'card-text text-secondary small mb-2' }, [
           `${p.species} · ${p.breed} · ${p.ageYears} yr`,
@@ -694,6 +743,7 @@ function petCard(p) {
           ` ${p.shelterName}`,
         ]),
         actionBtn,
+        myNote,
       ]),
     ]),
   ]);
@@ -775,11 +825,16 @@ function viewPets() {
         ])
       : null,
     el('p', { class: 'text-secondary mb-4' }, [
-      'Adoptions use an ',
+      'Submitting a request creates a row in ',
+      el('code', {}, ['AdoptionApplication']),
+      ' with ',
+      el('code', {}, ['IsAdopted = 0']),
+      ' (pending). Shelter staff approves by setting ',
+      el('code', {}, ['IsAdopted = 1']),
+      '. Sign in as an ',
       el('strong', {}, ['adopter']),
-      ' account (User). Staff (Employee) can browse but must use ',
-      el('strong', {}, ['Adopter sign in']),
-      ' to complete an adoption.',
+      ' (User) to apply; staff use the staff dashboard to review applications. ',
+      'Pets that are already adopted are not shown.',
     ]),
     el('div', { class: 'row g-3 mb-4' }, [
       el('div', { class: 'col-md-4' }, [
@@ -857,39 +912,6 @@ function viewStaff() {
   });
 }
 
-function viewAnalysis() {
-  const queries = [
-    'Most applied pets (top demand)',
-    'Application volume by species',
-    'Applications by breed (top breeds)',
-    'Demand by age bucket',
-    'Current availability by species',
-    'Adoptions completed by shelter',
-    'Shelter application approval rate',
-    'New user registrations by month',
-    'Applications per user (engagement)',
-    'Application-to-adoption funnel by shelter',
-  ];
-  const list = el('ol', { class: 'list-group list-group-numbered' });
-  queries.forEach((q) => {
-    list.appendChild(el('li', { class: 'list-group-item' }, [q]));
-  });
-  return el('div', { class: 'container py-4' }, [
-    el('h1', { class: 'h3 mb-3' }, ['Task 2: Analysis queries']),
-    el('p', { class: 'text-secondary mb-3' }, [
-      'Ten SQL queries for pet demand, shelter performance, and user growth live in ',
-      el('code', {}, ['sql/task2_analysis_queries.sql']),
-      ' at the project root. Adjust table and column names to match your implemented schema.',
-    ]),
-    el('div', { class: 'card border-0 shadow-sm' }, [
-      el('div', { class: 'card-body' }, [
-        el('h2', { class: 'h6 text-uppercase text-muted' }, ['Query topics covered']),
-        list,
-      ]),
-    ]),
-  ]);
-}
-
 function render() {
   const app = document.getElementById('app');
   if (!app) return;
@@ -901,7 +923,6 @@ function render() {
   if (state.route === 'home') main.appendChild(viewHome());
   else if (state.route === 'pets') main.appendChild(viewPets());
   else if (state.route === 'shelters') main.appendChild(viewShelters());
-  else if (state.route === 'analysis') main.appendChild(viewAnalysis());
   else if (state.route === 'staff') main.appendChild(viewStaff());
   else main.appendChild(viewHome());
 
@@ -911,7 +932,7 @@ function render() {
 
 function resolveRouteFromHash() {
   const hash = (window.location.hash || '#home').replace('#', '');
-  const allowed = ['home', 'pets', 'shelters', 'analysis', 'staff'];
+  const allowed = ['home', 'pets', 'shelters', 'staff'];
   let route = allowed.includes(hash) ? hash : 'home';
   if (route === 'staff' && !state.currentEmployee) {
     route = 'home';

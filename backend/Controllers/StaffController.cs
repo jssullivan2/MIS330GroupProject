@@ -36,6 +36,29 @@ public sealed class StaffController : ControllerBase
         return await cmd.ExecuteScalarAsync(cancellationToken) is not null;
     }
 
+    /// <summary>True when the pet belongs to the same non-null <c>ShelterID</c> as the employee.</summary>
+    private static async Task<bool> EmployeePetSameShelterAsync(
+        MySqlConnection conn,
+        int employeeId,
+        int petId,
+        CancellationToken cancellationToken)
+    {
+        const string sql = """
+            SELECT 1
+            FROM Pet p
+            INNER JOIN Employee e ON e.EmployeeID = @eid
+            WHERE p.PetID = @pid
+              AND e.ShelterID IS NOT NULL
+              AND p.ShelterID IS NOT NULL
+              AND p.ShelterID = e.ShelterID
+            LIMIT 1
+            """;
+        await using var cmd = new MySqlCommand(sql, conn);
+        cmd.Parameters.AddWithValue("@eid", employeeId);
+        cmd.Parameters.AddWithValue("@pid", petId);
+        return await cmd.ExecuteScalarAsync(cancellationToken) is not null;
+    }
+
     private async Task<ActionResult?> RequireStaffAsync(CancellationToken cancellationToken)
     {
         if (!TryGetStaffId(out var id))
@@ -161,7 +184,8 @@ public sealed class StaffController : ControllerBase
                 ) THEN 'Pending'
                 ELSE 'Available'
               END AS Status,
-              {PetQueryFragments.SelectPhotoUrlColumn}
+              {PetQueryFragments.SelectPhotoUrlColumn},
+              CAST(NULL AS CHAR(20)) AS MyApplicationStatus
             FROM Pet p
             ORDER BY p.PetID
             """;
@@ -176,6 +200,7 @@ public sealed class StaffController : ControllerBase
             while (await reader.ReadAsync(cancellationToken))
             {
                 var photoOrd = reader.GetOrdinal("PhotoUrl");
+                var myAppOrd = reader.GetOrdinal("MyApplicationStatus");
                 list.Add(new PetDto(
                     reader.GetInt32(reader.GetOrdinal("Id")),
                     reader.GetString(reader.GetOrdinal("Name")),
@@ -185,7 +210,8 @@ public sealed class StaffController : ControllerBase
                     reader.GetInt32(reader.GetOrdinal("ShelterId")),
                     reader.GetString(reader.GetOrdinal("ShelterName")),
                     reader.GetString(reader.GetOrdinal("Status")),
-                    reader.IsDBNull(photoOrd) ? null : reader.GetString(photoOrd)));
+                    reader.IsDBNull(photoOrd) ? null : reader.GetString(photoOrd),
+                    reader.IsDBNull(myAppOrd) ? null : reader.GetString(myAppOrd)));
             }
 
             return Ok(list);
@@ -318,6 +344,8 @@ public sealed class StaffController : ControllerBase
     {
         var auth = await RequireStaffAsync(cancellationToken);
         if (auth is not null) return auth;
+        if (!TryGetStaffId(out var staffId))
+            return Unauthorized("Missing or invalid X-Staff-Employee-Id header.");
 
         const string sql = """
             SELECT
@@ -332,6 +360,10 @@ public sealed class StaffController : ControllerBase
             FROM AdoptionApplication a
             INNER JOIN `User` u ON u.UserID = a.UserID
             INNER JOIN Pet p ON p.PetID = a.PetID
+            INNER JOIN Employee e ON e.EmployeeID = @empId
+            WHERE e.ShelterID IS NOT NULL
+              AND p.ShelterID IS NOT NULL
+              AND p.ShelterID = e.ShelterID
             ORDER BY a.UserID, a.PetID
             """;
 
@@ -340,6 +372,7 @@ public sealed class StaffController : ControllerBase
             await using var conn = _db.CreateConnection();
             await conn.OpenAsync(cancellationToken);
             await using var cmd = new MySqlCommand(sql, conn);
+            cmd.Parameters.AddWithValue("@empId", staffId);
             await using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
             var list = new List<StaffApplicationRowDto>();
             while (await reader.ReadAsync(cancellationToken))
@@ -373,6 +406,8 @@ public sealed class StaffController : ControllerBase
 
         var auth = await RequireStaffAsync(cancellationToken);
         if (auth is not null) return auth;
+        if (!TryGetStaffId(out var staffId))
+            return Unauthorized("Missing or invalid X-Staff-Employee-Id header.");
 
         const string sql = """
             INSERT INTO AdoptionApplication (UserID, PetID, IsAdopted)
@@ -384,6 +419,11 @@ public sealed class StaffController : ControllerBase
         {
             await using var conn = _db.CreateConnection();
             await conn.OpenAsync(cancellationToken);
+            if (!await EmployeePetSameShelterAsync(conn, staffId, body.PetId, cancellationToken))
+                return Problem(
+                    detail: "You can only create or update applications for pets assigned to your shelter.",
+                    statusCode: StatusCodes.Status403Forbidden);
+
             await using var cmd = new MySqlCommand(sql, conn);
             cmd.Parameters.AddWithValue("@u", body.UserId);
             cmd.Parameters.AddWithValue("@p", body.PetId);
@@ -406,6 +446,8 @@ public sealed class StaffController : ControllerBase
 
         var auth = await RequireStaffAsync(cancellationToken);
         if (auth is not null) return auth;
+        if (!TryGetStaffId(out var staffId))
+            return Unauthorized("Missing or invalid X-Staff-Employee-Id header.");
 
         const string sql = "DELETE FROM AdoptionApplication WHERE UserID = @u AND PetID = @p";
 
@@ -413,6 +455,11 @@ public sealed class StaffController : ControllerBase
         {
             await using var conn = _db.CreateConnection();
             await conn.OpenAsync(cancellationToken);
+            if (!await EmployeePetSameShelterAsync(conn, staffId, body.PetId, cancellationToken))
+                return Problem(
+                    detail: "You can only delete applications for pets assigned to your shelter.",
+                    statusCode: StatusCodes.Status403Forbidden);
+
             await using var cmd = new MySqlCommand(sql, conn);
             cmd.Parameters.AddWithValue("@u", body.UserId);
             cmd.Parameters.AddWithValue("@p", body.PetId);

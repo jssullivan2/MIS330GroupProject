@@ -9,7 +9,9 @@ public sealed record PetDto(
     int ShelterId,
     string ShelterName,
     string Status,
-    string? PhotoUrl);
+    string? PhotoUrl,
+    /// <summary>When <c>GET /api/pets?userId=…</c> is used: this adopter's row in <c>AdoptionApplication</c> (<c>pending</c> = IsAdopted 0, <c>adopted</c> = IsAdopted 1).</summary>
+    string? MyApplicationStatus);
 
 public sealed record ShelterDto(
     int Id,

@@ -55,10 +55,15 @@ function sortPets(pets, sortKey) {
   return copy;
 }
 
+/** Drops rows whose pet is already fully adopted (no longer needs approve/delete). */
+function excludeAppsForAdoptedPets(apps, pets) {
+  const statusByPetId = new Map((pets || []).map((p) => [p.id, p.status]));
+  return apps.filter((a) => statusByPetId.get(a.petId) !== 'Adopted');
+}
+
 function filterApps(apps, statusFilter, kw) {
   let list = apps;
-  if (statusFilter === 'adopted') list = list.filter((a) => a.isAdopted);
-  else if (statusFilter === 'pending') list = list.filter((a) => !a.isAdopted);
+  if (statusFilter === 'pending') list = list.filter((a) => !a.isAdopted);
   if (!kw.trim()) return list;
   const q = kw.trim().toLowerCase();
   return list.filter(
@@ -470,10 +475,11 @@ export function buildStaffDashboard(state, h) {
 
   // --- Applications tab
   const appStatus = el('select', { class: 'form-select form-select-sm' });
-  [['', 'All'], ['pending', 'Pending only'], ['adopted', 'Adopted only']].forEach(([v, lab]) => {
+  if (st.appStatusFilter === 'adopted') st.appStatusFilter = '';
+  [['', 'All open requests'], ['pending', 'Pending only']].forEach(([v, lab]) => {
     appStatus.appendChild(el('option', { value: v }, [lab]));
   });
-  appStatus.value = st.appStatusFilter;
+  appStatus.value = st.appStatusFilter === 'pending' ? 'pending' : '';
   appStatus.addEventListener('change', () => {
     st.appStatusFilter = appStatus.value;
     render();
@@ -523,7 +529,8 @@ export function buildStaffDashboard(state, h) {
     }
   });
 
-  const appRows = filterApps(applications, st.appStatusFilter, st.appKeyword).map((a) =>
+  const appsForManage = excludeAppsForAdoptedPets(applications, pets);
+  const appRows = filterApps(appsForManage, st.appStatusFilter, st.appKeyword).map((a) =>
     el('tr', {}, [
       el('td', {}, [String(a.userId)]),
       el('td', {}, [a.userEmail]),
@@ -532,7 +539,7 @@ export function buildStaffDashboard(state, h) {
       el('td', {}, [a.petType]),
       el('td', {}, [
         el('span', { class: `badge ${a.isAdopted ? 'bg-secondary' : 'bg-warning text-dark'}` }, [
-          a.isAdopted ? 'Adopted' : 'Pending',
+          a.isAdopted ? 'Adopted (1)' : 'Pending (0)',
         ]),
       ]),
       el('td', {}, [a.shelterId != null ? String(a.shelterId) : '—']),
@@ -541,6 +548,7 @@ export function buildStaffDashboard(state, h) {
           el('button', {
             type: 'button',
             class: 'btn btn-outline-success',
+            disabled: Boolean(a.isAdopted),
             onclick: async () => {
               try {
                 await api.staffUpsertApplication(empId, { userId: a.userId, petId: a.petId, isAdopted: true });
@@ -552,20 +560,6 @@ export function buildStaffDashboard(state, h) {
               }
             },
           }, ['Approve']),
-          el('button', {
-            type: 'button',
-            class: 'btn btn-outline-warning',
-            onclick: async () => {
-              try {
-                await api.staffUpsertApplication(empId, { userId: a.userId, petId: a.petId, isAdopted: false });
-                setToast('success', 'Marked pending.');
-                await loadStaffDashboard();
-                await loadData();
-              } catch (err) {
-                setToast('danger', err.message || 'Failed.');
-              }
-            },
-          }, ['Pending']),
           el('button', {
             type: 'button',
             class: 'btn btn-outline-danger',
@@ -592,11 +586,20 @@ export function buildStaffDashboard(state, h) {
     role: 'tabpanel',
   }, [
     el('p', { class: 'text-secondary' }, [
-      'Full application history from ',
+      'Open requests from ',
       el('code', {}, ['AdoptionApplication']),
-      '. Staff can record or update rows (e.g. phone/walk-in). Approve sets ',
+      ' for pets that are not yet fully adopted. ',
+      el('strong', {}, ['Pending (0)']),
+      ' / ',
+      el('strong', {}, ['Adopted (1)']),
+      ' in the State column reflect ',
       el('code', {}, ['IsAdopted']),
-      ' true; Pending sets it false.',
+      ' for that row. Approve sets it to ',
+      el('code', {}, ['1']),
+      '; use Delete to remove a request. Pets already adopted no longer appear here. ',
+      'You only see applications for pets at ',
+      el('strong', {}, ['your shelter']),
+      ' (Employee.ShelterID = Pet.ShelterID).',
     ]),
     el('div', { class: 'card border-0 shadow-sm mb-4' }, [
       el('div', { class: 'card-body' }, [

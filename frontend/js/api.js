@@ -71,8 +71,15 @@ export const api = {
    * Loads pets from MySQL via the API. Throws if the request fails (network, CORS, 503, etc.).
    * Returns a real array (possibly empty) on 200 OK.
    */
-  async getPets() {
-    const url = `${API_BASE_URL}/api/pets`;
+  /**
+   * @param {number | null | undefined} viewerUserId When signed in as an adopter, pass user id so each pet includes <code>myApplicationStatus</code> (<code>pending</code> = IsAdopted 0, <code>adopted</code> = 1).
+   */
+  async getPets(viewerUserId) {
+    const qs =
+      viewerUserId != null && Number.isFinite(Number(viewerUserId))
+        ? `?userId=${encodeURIComponent(String(viewerUserId))}`
+        : '';
+    const url = `${API_BASE_URL}/api/pets${qs}`;
     let res;
     try {
       res = await fetch(url, { headers: { Accept: 'application/json' } });
@@ -116,7 +123,8 @@ export const api = {
       body: JSON.stringify({ employeeName: employeeName.trim(), password }),
     }),
 
-  adoptPet: (petId, userId) =>
+  /** Submits an adoption request (MySQL IsAdopted = 0). Staff approves in the staff dashboard (sets 1). */
+  submitAdoptionRequest: (petId, userId) =>
     jsonRequest(`/api/pets/${petId}/adopt`, {
       method: 'POST',
       body: JSON.stringify({ userId }),
