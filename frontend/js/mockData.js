@@ -16,10 +16,3 @@ export const mockShelters = [
   { id: 2, name: 'Northside Shelter', address: '250 Lake Ave, Cleveland, OH', petsCount: 0, completedAdoptions: 0, approvalRate: null },
   { id: 3, name: 'Small Paws Haven', address: '9 Elm Rd, Cincinnati, OH', petsCount: 0, completedAdoptions: 0, approvalRate: null },
 ];
-
-export const mockSummary = {
-  totalPetsListed: 77,
-  availableNow: 52,
-  applicationsThisMonth: 189,
-  newUsersThisMonth: 64,
-};

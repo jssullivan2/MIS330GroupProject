@@ -112,6 +112,20 @@ export const api = {
     return data;
   },
 
+  async getSummary() {
+    const url = `${API_BASE_URL}/api/stats/summary`;
+    const res = await fetch(url, { headers: { Accept: 'application/json' } });
+    if (!res.ok) {
+      const text = await res.text();
+      throw new Error(text || `HTTP ${res.status} from /api/stats/summary`);
+    }
+    const data = await res.json();
+    if (!data || typeof data !== 'object') {
+      throw new Error('Invalid response: expected a JSON object for summary.');
+    }
+    return data;
+  },
+
   registerUser: (payload) =>
     jsonRequest('/api/users', {
       method: 'POST',

@@ -1,5 +1,5 @@
 import { api } from './api.js';
-import { mockPets, mockShelters, mockSummary } from './mockData.js';
+import { mockPets, mockShelters } from './mockData.js';
 import { buildStaffDashboard } from './staffDashboard.js';
 
 /** Adopter browse/home: do not list pets that are already adopted. */
@@ -35,7 +35,7 @@ const state = {
   route: 'home',
   pets: adopterVisiblePets([...mockPets]),
   shelters: [...mockShelters],
-  summary: { ...mockSummary },
+  summary: null,
   petFilterSpecies: '',
   petFilterShelterId: '',
   loading: false,
@@ -129,9 +129,10 @@ async function loadData() {
   state.petsFromApi = false;
   render();
 
-  const [petsOutcome, sheltersOutcome] = await Promise.allSettled([
+  const [petsOutcome, sheltersOutcome, summaryOutcome] = await Promise.allSettled([
     api.getPets(state.currentUser?.id),
     api.getShelters(),
+    api.getSummary(),
   ]);
 
   if (petsOutcome.status === 'fulfilled') {
@@ -150,7 +151,11 @@ async function loadData() {
     state.shelters = [...mockShelters];
   }
 
-  state.summary = { ...mockSummary };
+  if (summaryOutcome.status === 'fulfilled') {
+    state.summary = summaryOutcome.value;
+  } else {
+    state.summary = null;
+  }
   state.loading = false;
   render();
 }
@@ -641,12 +646,12 @@ function heroSection() {
 }
 
 function statCards() {
-  const s = state.summary || mockSummary;
+  const s = state.summary;
   const cards = [
-    { label: 'Pets on platform', value: s.totalPetsListed, icon: 'bi-tags' },
-    { label: 'Available now', value: s.availableNow, icon: 'bi-check-circle' },
-    { label: 'Applications (month)', value: s.applicationsThisMonth, icon: 'bi-envelope-open' },
-    { label: 'New users (month)', value: s.newUsersThisMonth, icon: 'bi-people' },
+    { label: 'Pets on platform', value: s?.totalPetsListed, icon: 'bi-tags' },
+    { label: 'Available now', value: s?.availableNow, icon: 'bi-check-circle' },
+    { label: 'Applications total', value: s?.applicationsThisMonth, icon: 'bi-envelope-open' },
+    { label: 'Registered users', value: s?.newUsersThisMonth, icon: 'bi-people' },
   ];
   return el('div', { class: 'row g-3 mb-4' }, cards.map((c) =>
     el('div', { class: 'col-6 col-md-3' }, [
@@ -656,7 +661,7 @@ function statCards() {
             el('i', { class: `bi ${c.icon} fs-4 me-2` }),
             el('span', { class: 'small text-uppercase fw-semibold stat-pill' }, [c.label]),
           ]),
-          el('div', { class: 'fs-3 fw-bold text-dark' }, [String(c.value)]),
+          el('div', { class: 'fs-3 fw-bold text-dark' }, [c.value == null ? '—' : String(c.value)]),
         ]),
       ]),
     ])
