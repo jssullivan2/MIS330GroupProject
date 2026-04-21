@@ -13,13 +13,14 @@ public sealed record PetDto(
     /// <summary>When <c>GET /api/pets?userId=…</c> is used: this adopter's row in <c>AdoptionApplication</c> (<c>pending</c> = IsAdopted 0, <c>adopted</c> = IsAdopted 1).</summary>
     string? MyApplicationStatus);
 
+/// <summary>Public shelter directory from <c>Shelter</c> with counts derived from <c>Pet</c> and <c>AdoptionApplication</c>.</summary>
 public sealed record ShelterDto(
     int Id,
     string Name,
-    string City,
-    string State,
+    string Address,
     int PetsCount,
-    int AdoptionsYtd,
+    /// <summary>Applications for pets at this shelter with <c>IsAdopted = TRUE</c> (completed).</summary>
+    int CompletedAdoptions,
     double? ApprovalRate);
 
 public sealed record SummaryDto(

@@ -74,6 +74,18 @@ export const api = {
   /**
    * @param {number | null | undefined} viewerUserId When signed in as an adopter, pass user id so each pet includes <code>myApplicationStatus</code> (<code>pending</code> = IsAdopted 0, <code>adopted</code> = 1).
    */
+  async getShelters() {
+    const url = `${API_BASE_URL}/api/shelters`;
+    const res = await fetch(url, { headers: { Accept: 'application/json' } });
+    if (!res.ok) {
+      const text = await res.text();
+      throw new Error(text || `HTTP ${res.status} from /api/shelters`);
+    }
+    const data = await res.json();
+    if (!Array.isArray(data)) throw new Error('Invalid response: expected a JSON array of shelters.');
+    return data;
+  },
+
   async getPets(viewerUserId) {
     const qs =
       viewerUserId != null && Number.isFinite(Number(viewerUserId))

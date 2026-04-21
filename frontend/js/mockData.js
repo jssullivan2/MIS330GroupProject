@@ -10,10 +10,11 @@ export const mockPets = [
   { id: 5, name: 'Coco', species: 'Dog', breed: 'Corgi', ageYears: 2, shelterId: 3, shelterName: 'Small Paws Haven', status: 'Available', photoUrl: 'https://images.unsplash.com/photo-1543466835-00a7907e9de1?w=600' },
 ];
 
+/** Fallback when /api/shelters fails — align names/addresses with sql/schema_and_seed.sql. */
 export const mockShelters = [
-  { id: 1, name: 'River City Rescue', city: 'Columbus', state: 'OH', petsCount: 24, adoptionsYtd: 58, approvalRate: 0.42 },
-  { id: 2, name: 'Northside Shelter', city: 'Cleveland', state: 'OH', petsCount: 41, adoptionsYtd: 72, approvalRate: 0.38 },
-  { id: 3, name: 'Small Paws Haven', city: 'Cincinnati', state: 'OH', petsCount: 12, adoptionsYtd: 31, approvalRate: 0.51 },
+  { id: 1, name: 'River City Rescue', address: '100 Main St, Columbus, OH', petsCount: 0, completedAdoptions: 0, approvalRate: null },
+  { id: 2, name: 'Northside Shelter', address: '250 Lake Ave, Cleveland, OH', petsCount: 0, completedAdoptions: 0, approvalRate: null },
+  { id: 3, name: 'Small Paws Haven', address: '9 Elm Rd, Cincinnati, OH', petsCount: 0, completedAdoptions: 0, approvalRate: null },
 ];
 
 export const mockSummary = {

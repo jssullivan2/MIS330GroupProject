@@ -128,23 +128,31 @@ async function loadData() {
   state.error = null;
   state.petsFromApi = false;
   render();
-  try {
-    // Only pets are loaded from MySQL via the API. Shelters + dashboard summary stay local mock data.
-    const pets = await api.getPets(state.currentUser?.id);
-    state.pets = adopterVisiblePets(pets);
+
+  const [petsOutcome, sheltersOutcome] = await Promise.allSettled([
+    api.getPets(state.currentUser?.id),
+    api.getShelters(),
+  ]);
+
+  if (petsOutcome.status === 'fulfilled') {
+    state.pets = adopterVisiblePets(petsOutcome.value);
     state.petsFromApi = true;
-    state.shelters = [...mockShelters];
-    state.summary = { ...mockSummary };
-  } catch (e) {
-    state.error = e.message || 'Failed to load data.';
+  } else {
+    const e = petsOutcome.reason;
+    state.error = e instanceof Error ? e.message : String(e);
     state.pets = adopterVisiblePets([...mockPets]);
     state.petsFromApi = false;
-    state.shelters = [...mockShelters];
-    state.summary = { ...mockSummary };
-  } finally {
-    state.loading = false;
-    render();
   }
+
+  if (sheltersOutcome.status === 'fulfilled') {
+    state.shelters = sheltersOutcome.value;
+  } else {
+    state.shelters = [...mockShelters];
+  }
+
+  state.summary = { ...mockSummary };
+  state.loading = false;
+  render();
 }
 
 async function loadStaffDashboard() {
@@ -851,29 +859,36 @@ function viewPets() {
 
 function viewShelters() {
   return el('div', { class: 'container py-4' }, [
-    el('h1', { class: 'h3 mb-3' }, ['Shelter performance snapshot']),
-    el('p', { class: 'text-secondary mb-4' }, [
-      'Metrics come from MySQL: pet counts, year-to-date adoptions, and application approval rates.',
-    ]),
-    el('div', { class: 'row g-4' }, state.shelters.map((s) => {
-      const rateText =
-        s.approvalRate == null || Number.isNaN(s.approvalRate)
-          ? 'N/A'
-          : `${Math.round(Number(s.approvalRate) * 100)}%`;
-      return el('div', { class: 'col-md-4' }, [
-        el('div', { class: 'card border-0 shadow-sm h-100' }, [
-          el('div', { class: 'card-body' }, [
-            el('h5', { class: 'card-title' }, [s.name]),
-            el('p', { class: 'text-secondary small mb-3' }, [`${s.city}, ${s.state}`]),
-            el('ul', { class: 'list-unstyled small mb-0' }, [
-              el('li', {}, [`Pets listed: `, el('strong', {}, [String(s.petsCount)])]),
-              el('li', {}, [`Adoptions YTD: `, el('strong', {}, [String(s.adoptionsYtd)])]),
-              el('li', {}, ['Approval rate: ', el('strong', {}, [rateText])]),
+    el('h1', { class: 'h3 mb-4' }, ['Shelter performance snapshot']),
+    state.shelters.length === 0
+      ? el('p', { class: 'text-secondary' }, [
+          'No shelters in the database yet. Seed ',
+          el('code', {}, ['schema_and_seed.sql']),
+          ' and refresh.',
+        ])
+      : el('div', { class: 'row g-4' }, state.shelters.map((s) => {
+        const loc = s.address || [s.city, s.state].filter(Boolean).join(', ');
+        const listed = s.petsCount ?? 0;
+        const completed =
+          s.completedAdoptions ?? s.adoptionsYtd ?? 0;
+        const rateText =
+          s.approvalRate == null || Number.isNaN(s.approvalRate)
+            ? 'N/A'
+            : `${Math.round(Number(s.approvalRate) * 100)}%`;
+        return el('div', { class: 'col-md-4' }, [
+          el('div', { class: 'card border-0 shadow-sm h-100' }, [
+            el('div', { class: 'card-body' }, [
+              el('h5', { class: 'card-title' }, [s.name]),
+              el('p', { class: 'text-secondary small mb-3' }, [loc]),
+              el('ul', { class: 'list-unstyled small mb-0' }, [
+                el('li', {}, ['Pets listed: ', el('strong', {}, [String(listed)])]),
+                el('li', {}, ['Completed adoptions: ', el('strong', {}, [String(completed)])]),
+                el('li', {}, ['Approval rate: ', el('strong', {}, [rateText])]),
+              ]),
             ]),
           ]),
-        ]),
-      ]);
-    })),
+        ]);
+      })),
   ]);
 }
 
