@@ -22,7 +22,7 @@ public sealed class PetsController : ControllerBase
     [HttpGet]
     public async Task<ActionResult<IReadOnlyList<PetDto>>> GetAll(CancellationToken cancellationToken)
     {
-        const string sql = """
+        var sql = $"""
             SELECT
               p.PetID AS Id,
               p.PetName AS Name,
@@ -45,7 +45,7 @@ public sealed class PetsController : ControllerBase
                 ) THEN 'Pending'
                 ELSE 'Available'
               END AS Status,
-              CAST(NULL AS CHAR(255)) AS PhotoUrl
+              {PetQueryFragments.SelectPhotoUrlColumn}
             FROM Pet p
             ORDER BY p.PetID
             """;
@@ -138,7 +138,7 @@ public sealed class PetsController : ControllerBase
 
             await tx.CommitAsync(cancellationToken);
 
-            const string selectSql = """
+            var selectSql = $"""
                 SELECT
                   p.PetID AS Id,
                   p.PetName AS Name,
@@ -161,7 +161,7 @@ public sealed class PetsController : ControllerBase
                     ) THEN 'Pending'
                     ELSE 'Available'
                   END AS Status,
-                  CAST(NULL AS CHAR(255)) AS PhotoUrl
+                  {PetQueryFragments.SelectPhotoUrlColumn}
                 FROM Pet p
                 WHERE p.PetID = @petId
                 """;

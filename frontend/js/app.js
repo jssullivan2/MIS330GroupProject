@@ -489,7 +489,7 @@ function navBar() {
   ];
   const brand = el('a', { class: 'navbar-brand fw-semibold', href: '#' }, [
     el('i', { class: 'bi bi-paw-fill brand-paw me-1' }),
-    document.createTextNode(' PawMatch'),
+    document.createTextNode(' Paw & Homes'),
   ]);
   brand.addEventListener('click', (e) => {
     e.preventDefault();

@@ -138,7 +138,7 @@ public sealed class StaffController : ControllerBase
         var auth = await RequireStaffAsync(cancellationToken);
         if (auth is not null) return auth;
 
-        const string sql = """
+        var sql = $"""
             SELECT
               p.PetID AS Id,
               p.PetName AS Name,
@@ -161,7 +161,7 @@ public sealed class StaffController : ControllerBase
                 ) THEN 'Pending'
                 ELSE 'Available'
               END AS Status,
-              CAST(NULL AS CHAR(255)) AS PhotoUrl
+              {PetQueryFragments.SelectPhotoUrlColumn}
             FROM Pet p
             ORDER BY p.PetID
             """;
