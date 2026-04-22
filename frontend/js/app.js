@@ -13,7 +13,8 @@ const STORAGE_KEY_EMPLOYEE = 'pawmatchEmployee';
 
 function defaultStaffState() {
   return {
-    tab: 'users',
+    tab: 'profile',
+    profile: null,
     users: null,
     pets: null,
     applications: null,
@@ -36,6 +37,7 @@ const state = {
   pets: adopterVisiblePets([...mockPets]),
   shelters: [...mockShelters],
   summary: null,
+  userApplications: null,
   petFilterSpecies: '',
   petFilterShelterId: '',
   loading: false,
@@ -95,6 +97,10 @@ function clearEmployeeSession() {
   state.staff = defaultStaffState();
 }
 
+function hasActiveSession() {
+  return Boolean(state.currentUser || state.currentEmployee);
+}
+
 function setToast(kind, text) {
   state.toast = { kind, text };
   render();
@@ -129,11 +135,13 @@ async function loadData() {
   state.petsFromApi = false;
   render();
 
-  const [petsOutcome, sheltersOutcome, summaryOutcome] = await Promise.allSettled([
+  const requests = [
     api.getPets(state.currentUser?.id),
     api.getShelters(),
     api.getSummary(),
-  ]);
+    state.currentUser ? api.getUserApplications(state.currentUser.id) : Promise.resolve(null),
+  ];
+  const [petsOutcome, sheltersOutcome, summaryOutcome, userAppsOutcome] = await Promise.allSettled(requests);
 
   if (petsOutcome.status === 'fulfilled') {
     state.pets = adopterVisiblePets(petsOutcome.value);
@@ -156,6 +164,11 @@ async function loadData() {
   } else {
     state.summary = null;
   }
+  if (userAppsOutcome.status === 'fulfilled') {
+    state.userApplications = userAppsOutcome.value;
+  } else {
+    state.userApplications = null;
+  }
   state.loading = false;
   render();
 }
@@ -167,12 +180,14 @@ async function loadStaffDashboard() {
   state.staff.error = null;
   render();
   try {
-    const [users, pets, applications, shelters] = await Promise.all([
+    const [profile, users, pets, applications, shelters] = await Promise.all([
+      api.staffGetProfile(empId),
       api.staffListUsers(empId),
       api.staffListPets(empId),
       api.staffListApplications(empId),
       api.staffListShelters(empId),
     ]);
+    state.staff.profile = profile;
     state.staff.users = users;
     state.staff.pets = pets;
     state.staff.applications = applications;
@@ -186,6 +201,10 @@ async function loadStaffDashboard() {
 }
 
 function openRegisterModal() {
+  if (hasActiveSession()) {
+    setToast('warning', 'Sign out before creating or signing into another account.');
+    return;
+  }
   const modalEl = document.getElementById('pmRegisterModal');
   if (!modalEl || !window.bootstrap) return;
   const feedback = document.getElementById('pmRegisterFeedback');
@@ -196,6 +215,10 @@ function openRegisterModal() {
 }
 
 function openUserLoginModal() {
+  if (hasActiveSession()) {
+    setToast('warning', 'Sign out before creating or signing into another account.');
+    return;
+  }
   const modalEl = document.getElementById('pmUserLoginModal');
   if (!modalEl || !window.bootstrap) return;
   const fb = document.getElementById('pmUserLoginFeedback');
@@ -206,6 +229,10 @@ function openUserLoginModal() {
 }
 
 function openEmployeeLoginModal() {
+  if (hasActiveSession()) {
+    setToast('warning', 'Sign out before creating or signing into another account.');
+    return;
+  }
   const modalEl = document.getElementById('pmEmployeeLoginModal');
   if (!modalEl || !window.bootstrap) return;
   const fb = document.getElementById('pmEmployeeLoginFeedback');
@@ -505,6 +532,9 @@ function navBar() {
     { id: 'home', label: 'Home', icon: 'bi-house' },
     { id: 'pets', label: 'Browse pets', icon: 'bi-heart' },
     { id: 'shelters', label: 'Shelters', icon: 'bi-building' },
+    ...(state.currentUser
+      ? [{ id: 'profile', label: 'My profile', icon: 'bi-person-badge' }]
+      : []),
     ...(state.currentEmployee
       ? [{ id: 'staff', label: 'Staff dashboard', icon: 'bi-speedometer2' }]
       : []),
@@ -543,17 +573,14 @@ function navBar() {
       ]),
     ]));
     const empOut = el('a', { class: 'nav-link', href: '#' }, [el('i', { class: 'bi bi-box-arrow-right me-1' }), 'Staff sign out']);
-    empOut.addEventListener('click', (e) => {
+    empOut.addEventListener('click', async (e) => {
       e.preventDefault();
       clearEmployeeSession();
-      if (state.route === 'staff') {
-        navigate('home');
-      } else {
-        render();
-      }
+      navigate('home');
+      await loadData();
     });
     ul.appendChild(el('li', { class: 'nav-item' }, [empOut]));
-  } else {
+  } else if (!state.currentUser) {
     const staffIn = el('a', { class: 'nav-link', href: '#' }, [el('i', { class: 'bi bi-shield-lock me-1' }), 'Staff login']);
     staffIn.addEventListener('click', (e) => {
       e.preventDefault();
@@ -576,11 +603,11 @@ function navBar() {
     signOut.addEventListener('click', async (e) => {
       e.preventDefault();
       clearUserSession();
-      render();
+      navigate('home');
       await loadData();
     });
     ul.appendChild(el('li', { class: 'nav-item' }, [signOut]));
-  } else {
+  } else if (!state.currentEmployee) {
     const reg = el('a', { class: 'nav-link', href: '#' }, [el('i', { class: 'bi bi-person-plus me-1' }), 'Create account']);
     reg.addEventListener('click', (e) => {
       e.preventDefault();
@@ -610,6 +637,7 @@ function navBar() {
 }
 
 function heroSection() {
+  const canStartAuth = !hasActiveSession();
   return el('section', { class: 'hero-gradient text-white py-5 mb-4' }, [
     el('div', { class: 'container' }, [
       el('div', { class: 'row align-items-center' }, [
@@ -620,21 +648,29 @@ function heroSection() {
           ]),
           el('div', { class: 'd-flex flex-wrap gap-2' }, [
             el('button', { type: 'button', class: 'btn btn-light btn-lg', onclick: () => navigate('pets') }, ['Browse pets']),
-            el('button', {
-              type: 'button',
-              class: 'btn btn-outline-light btn-lg',
-              onclick: () => openRegisterModal(),
-            }, ['Create adopter account']),
-            el('button', {
-              type: 'button',
-              class: 'btn btn-outline-light btn-lg',
-              onclick: () => openUserLoginModal(),
-            }, ['Adopter sign in']),
-            el('button', {
-              type: 'button',
-              class: 'btn btn-outline-light border-light text-white btn-lg',
-              onclick: () => openEmployeeLoginModal(),
-            }, ['Staff login']),
+            ...(canStartAuth
+              ? [
+                el('button', {
+                  type: 'button',
+                  class: 'btn btn-outline-light btn-lg',
+                  onclick: () => openRegisterModal(),
+                }, ['Create adopter account']),
+                el('button', {
+                  type: 'button',
+                  class: 'btn btn-outline-light btn-lg',
+                  onclick: () => openUserLoginModal(),
+                }, ['Adopter sign in']),
+                el('button', {
+                  type: 'button',
+                  class: 'btn btn-outline-light border-light text-white btn-lg',
+                  onclick: () => openEmployeeLoginModal(),
+                }, ['Staff login']),
+              ]
+              : [
+                el('span', { class: 'badge bg-light text-dark px-3 py-2 align-self-center' }, [
+                  'Signed in. Sign out to switch accounts.',
+                ]),
+              ]),
           ]),
         ]),
         el('div', { class: 'col-lg-5 mt-4 mt-lg-0 text-center' }, [
@@ -783,11 +819,93 @@ function viewHome() {
         : null,
       el('h2', { class: 'h4 mb-3' }, ['At a glance']),
       statCards(),
+      state.currentUser ? el('div', { class: 'mb-4' }, [
+        el('div', { class: 'card border-0 shadow-sm' }, [
+          el('div', { class: 'card-body d-flex justify-content-between align-items-center' }, [
+            el('div', {}, [
+              el('h3', { class: 'h6 mb-1' }, ['Adopter profile']),
+              el('p', { class: 'small text-secondary mb-0' }, ['Track your pet applications and statuses in one place.']),
+            ]),
+            el('button', { type: 'button', class: 'btn btn-outline-primary btn-sm', onclick: () => navigate('profile') }, [
+              'Open profile',
+            ]),
+          ]),
+        ]),
+      ]) : null,
       el('div', { class: 'd-flex justify-content-between align-items-center mb-3' }, [
         el('h2', { class: 'h4 mb-0' }, ['Featured pets']),
         el('button', { type: 'button', class: 'btn btn-link', onclick: () => navigate('pets') }, ['See all']),
       ]),
       el('div', { class: 'row g-4' }, featured.map(petCard)),
+    ]),
+  ]);
+}
+
+function viewAdopterProfile() {
+  if (!state.currentUser) {
+    return el('div', { class: 'container py-5' }, [
+      el('div', { class: 'alert alert-warning' }, ['Sign in as an adopter to view your profile dashboard.']),
+      el('button', { type: 'button', class: 'btn btn-primary', onclick: () => openUserLoginModal() }, ['Adopter sign in']),
+    ]);
+  }
+
+  const apps = Array.isArray(state.userApplications) ? state.userApplications : [];
+  const accepted = apps.filter((a) => a.applicationStatus === 'Accepted').length;
+  const pending = apps.filter((a) => a.applicationStatus === 'Pending').length;
+  const denied = apps.filter((a) => a.applicationStatus === 'Denied').length;
+
+  const stat = (label, value, icon) => el('div', { class: 'col-6 col-md-3' }, [
+    el('div', { class: 'card border-0 shadow-sm h-100' }, [
+      el('div', { class: 'card-body' }, [
+        el('div', { class: 'small text-uppercase text-secondary fw-semibold mb-2' }, [el('i', { class: `bi ${icon} me-1` }), label]),
+        el('div', { class: 'fs-4 fw-bold' }, [String(value)]),
+      ]),
+    ]),
+  ]);
+
+  const statusBadge = (status) => {
+    if (status === 'Accepted') return el('span', { class: 'badge bg-success' }, ['Accepted']);
+    if (status === 'Denied') return el('span', { class: 'badge bg-danger' }, ['Denied']);
+    return el('span', { class: 'badge bg-warning text-dark' }, ['Pending']);
+  };
+
+  const rows = apps.map((a) => el('tr', {}, [
+    el('td', {}, [String(a.petId)]),
+    el('td', {}, [a.petName]),
+    el('td', {}, [a.petType]),
+    el('td', {}, [a.shelterName]),
+    el('td', {}, [statusBadge(a.applicationStatus)]),
+  ]));
+
+  return el('div', { class: 'container py-4' }, [
+    el('h1', { class: 'h3 mb-2' }, ['Adopter profile']),
+    el('p', { class: 'text-secondary mb-4' }, [
+      'Track pets you applied for and monitor each application status.',
+    ]),
+    el('div', { class: 'row g-3 mb-4' }, [
+      stat('Applications submitted', apps.length, 'bi-inboxes'),
+      stat('Accepted', accepted, 'bi-check2-circle'),
+      stat('Pending', pending, 'bi-hourglass-split'),
+      stat('Denied', denied, 'bi-x-circle'),
+    ]),
+    el('div', { class: 'card border-0 shadow-sm' }, [
+      el('div', { class: 'card-body' }, [
+        el('h2', { class: 'h6 mb-3' }, ['Application history']),
+        el('div', { class: 'table-responsive' }, [
+          el('table', { class: 'table table-sm table-hover align-middle mb-0' }, [
+            el('thead', {}, [
+              el('tr', {}, [
+                el('th', {}, ['Pet ID']),
+                el('th', {}, ['Pet']),
+                el('th', {}, ['Type']),
+                el('th', {}, ['Shelter']),
+                el('th', {}, ['Status']),
+              ]),
+            ]),
+            el('tbody', {}, rows.length ? rows : [el('tr', {}, [el('td', { colspan: '5', class: 'text-secondary' }, ['No applications submitted yet.'])])]),
+          ]),
+        ]),
+      ]),
     ]),
   ]);
 }
@@ -931,6 +1049,7 @@ function render() {
   if (state.route === 'home') main.appendChild(viewHome());
   else if (state.route === 'pets') main.appendChild(viewPets());
   else if (state.route === 'shelters') main.appendChild(viewShelters());
+  else if (state.route === 'profile') main.appendChild(viewAdopterProfile());
   else if (state.route === 'staff') main.appendChild(viewStaff());
   else main.appendChild(viewHome());
 
@@ -940,8 +1059,12 @@ function render() {
 
 function resolveRouteFromHash() {
   const hash = (window.location.hash || '#home').replace('#', '');
-  const allowed = ['home', 'pets', 'shelters', 'staff'];
+  const allowed = ['home', 'pets', 'shelters', 'profile', 'staff'];
   let route = allowed.includes(hash) ? hash : 'home';
+  if (route === 'profile' && !state.currentUser) {
+    route = 'home';
+    window.history.replaceState({}, '', '#home');
+  }
   if (route === 'staff' && !state.currentEmployee) {
     route = 'home';
     window.history.replaceState({}, '', '#home');

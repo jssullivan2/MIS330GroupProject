@@ -156,6 +156,18 @@ export const api = {
       body: JSON.stringify({ userId }),
     }),
 
+  async getUserApplications(userId) {
+    const url = `${API_BASE_URL}/api/users/${encodeURIComponent(String(userId))}/applications`;
+    const res = await fetch(url, { headers: { Accept: 'application/json' } });
+    if (!res.ok) {
+      const text = await res.text();
+      throw new Error(text || `HTTP ${res.status} from /api/users/{id}/applications`);
+    }
+    const data = await res.json();
+    if (!Array.isArray(data)) throw new Error('Invalid user applications response.');
+    return data;
+  },
+
   async staffListUsers(employeeId) {
     const data = await staffJsonGet('/api/staff/users', employeeId);
     if (!Array.isArray(data)) throw new Error('Invalid staff users response.');
@@ -220,6 +232,12 @@ export const api = {
   async staffListShelters(employeeId) {
     const data = await staffJsonGet('/api/staff/shelters', employeeId);
     if (!Array.isArray(data)) throw new Error('Invalid staff shelters response.');
+    return data;
+  },
+
+  async staffGetProfile(employeeId) {
+    const data = await staffJsonGet('/api/staff/profile', employeeId);
+    if (!data || typeof data !== 'object') throw new Error('Invalid staff profile response.');
     return data;
   },
 };

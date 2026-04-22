@@ -151,6 +151,7 @@ export function buildStaffDashboard(state, h) {
   const pets = st.pets || [];
   const applications = st.applications || [];
   const shelters = st.shelters || [];
+  const profile = st.profile;
 
   const setTab = (id) => {
     st.tab = id;
@@ -158,11 +159,111 @@ export function buildStaffDashboard(state, h) {
   };
 
   const tabs = el('ul', { class: 'nav nav-tabs mb-3', role: 'tablist' }, [
+    tabButton(el, 'profile', 'My profile', st.tab === 'profile', setTab),
     tabButton(el, 'users', 'User management', st.tab === 'users', setTab),
     tabButton(el, 'pets', 'Pets (CRUD & search)', st.tab === 'pets', setTab),
     tabButton(el, 'applications', 'Applications', st.tab === 'applications', setTab),
     tabButton(el, 'shelters', 'Shelters', st.tab === 'shelters', setTab),
   ]);
+
+  // --- Profile tab
+  const decisionBadge = (decisionStatus) => {
+    if (decisionStatus === 'Accepted') return el('span', { class: 'badge bg-success' }, ['Accepted']);
+    if (decisionStatus === 'Denied') return el('span', { class: 'badge bg-danger' }, ['Denied']);
+    return el('span', { class: 'badge bg-warning text-dark' }, ['Pending']);
+  };
+  const profilePane = el('div', {
+    class: `tab-pane fade ${st.tab === 'profile' ? 'show active' : ''}`,
+    id: 'staff-pane-profile',
+    role: 'tabpanel',
+  }, profile
+    ? [
+      el('div', { class: 'row g-3 mb-4' }, [
+        el('div', { class: 'col-md-4' }, [
+          el('div', { class: 'card border-0 shadow-sm h-100' }, [
+            el('div', { class: 'card-body' }, [
+              el('div', { class: 'small text-uppercase text-secondary fw-semibold mb-2' }, ['Pets added by you']),
+              el('div', { class: 'fs-3 fw-bold' }, [String(profile.petsAddedCount)]),
+            ]),
+          ]),
+        ]),
+        el('div', { class: 'col-md-4' }, [
+          el('div', { class: 'card border-0 shadow-sm h-100' }, [
+            el('div', { class: 'card-body' }, [
+              el('div', { class: 'small text-uppercase text-secondary fw-semibold mb-2' }, ['Accepted adoptions']),
+              el('div', { class: 'fs-3 fw-bold text-success' }, [String(profile.acceptedCount)]),
+            ]),
+          ]),
+        ]),
+        el('div', { class: 'col-md-4' }, [
+          el('div', { class: 'card border-0 shadow-sm h-100' }, [
+            el('div', { class: 'card-body' }, [
+              el('div', { class: 'small text-uppercase text-secondary fw-semibold mb-2' }, ['Denied']),
+              el('div', { class: 'fs-3 fw-bold text-danger' }, [String(profile.deniedOrPendingCount)]),
+            ]),
+          ]),
+        ]),
+      ]),
+      el('div', { class: 'row g-4' }, [
+        el('div', { class: 'col-lg-5' }, [
+          el('div', { class: 'card border-0 shadow-sm h-100' }, [
+            el('div', { class: 'card-body' }, [
+              el('h3', { class: 'h6 mb-3' }, ['Pets you listed']),
+              el('div', { class: 'table-responsive' }, [
+                el('table', { class: 'table table-sm table-hover align-middle mb-0' }, [
+                  el('thead', {}, [
+                    el('tr', {}, [
+                      el('th', {}, ['ID']),
+                      el('th', {}, ['Name']),
+                      el('th', {}, ['Type']),
+                      el('th', {}, ['Breed']),
+                    ]),
+                  ]),
+                  el('tbody', {}, profile.petsAdded.length
+                    ? profile.petsAdded.map((p) => el('tr', {}, [
+                      el('td', {}, [String(p.petId)]),
+                      el('td', {}, [p.petName]),
+                      el('td', {}, [p.petType]),
+                      el('td', {}, [p.petBreed || '—']),
+                    ]))
+                    : [el('tr', {}, [el('td', { colspan: '4', class: 'text-secondary' }, ['No pets created by this staff account yet.'])])]),
+                ]),
+              ]),
+            ]),
+          ]),
+        ]),
+        el('div', { class: 'col-lg-7' }, [
+          el('div', { class: 'card border-0 shadow-sm h-100' }, [
+            el('div', { class: 'card-body' }, [
+              el('h3', { class: 'h6 mb-3' }, ['Past adoption decisions (accepted or denied)']),
+              el('div', { class: 'table-responsive' }, [
+                el('table', { class: 'table table-sm table-hover align-middle mb-0' }, [
+                  el('thead', {}, [
+                    el('tr', {}, [
+                      el('th', {}, ['User']),
+                      el('th', {}, ['Email']),
+                      el('th', {}, ['Pet']),
+                      el('th', {}, ['Pet ID']),
+                      el('th', {}, ['Decision']),
+                    ]),
+                  ]),
+                  el('tbody', {}, profile.decisions.length
+                    ? profile.decisions.map((d) => el('tr', {}, [
+                      el('td', {}, [d.userName]),
+                      el('td', {}, [d.userEmail]),
+                      el('td', {}, [d.petName]),
+                      el('td', {}, [String(d.petId)]),
+                      el('td', {}, [decisionBadge(d.decisionStatus)]),
+                    ]))
+                    : [el('tr', {}, [el('td', { colspan: '5', class: 'text-secondary' }, ['No adoption decisions for your shelter yet.'])])]),
+                ]),
+              ]),
+            ]),
+          ]),
+        ]),
+      ]),
+    ]
+    : [el('div', { class: 'alert alert-secondary' }, ['Profile data is not available yet. Click Refresh data.'])]);
 
   // --- Users tab
   const userKw = el('input', {
@@ -707,7 +808,7 @@ export function buildStaffDashboard(state, h) {
     ]),
   ]);
 
-  const tabContent = el('div', { class: 'tab-content' }, [paneUsers, panePets, paneApps, paneShelters]);
+  const tabContent = el('div', { class: 'tab-content' }, [profilePane, paneUsers, panePets, paneApps, paneShelters]);
 
   return el('div', { class: 'container py-4' }, [header, tabs, tabContent]);
 }

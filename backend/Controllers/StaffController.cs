@@ -588,4 +588,139 @@ public sealed class StaffController : ControllerBase
             return Problem(detail: ex.Message, statusCode: StatusCodes.Status503ServiceUnavailable);
         }
     }
+
+    [HttpGet("profile")]
+    public async Task<ActionResult<StaffProfileDto>> GetProfile(CancellationToken cancellationToken)
+    {
+        var auth = await RequireStaffAsync(cancellationToken);
+        if (auth is not null) return auth;
+        if (!TryGetStaffId(out var staffId))
+            return Unauthorized("Missing or invalid X-Staff-Employee-Id header.");
+
+        const string employeeSql = """
+            SELECT EmployeeID, EmployeeName, ShelterID
+            FROM Employee
+            WHERE EmployeeID = @id
+            LIMIT 1
+            """;
+        const string petsSql = """
+            SELECT
+              p.PetID AS PetId,
+              p.PetName,
+              p.PetType,
+              p.PetBreed,
+              p.ShelterID AS ShelterId
+            FROM Pet p
+            WHERE p.EmployeeID = @id
+            ORDER BY p.PetID
+            """;
+        const string decisionsSql = """
+            SELECT
+              a.UserID AS UserId,
+              u.UserName,
+              u.UserEmail,
+              a.PetID AS PetId,
+              p.PetName,
+              a.IsAdopted,
+              CASE
+                WHEN a.IsAdopted THEN 'Accepted'
+                WHEN EXISTS (
+                  SELECT 1
+                  FROM AdoptionApplication ax
+                  WHERE ax.PetID = a.PetID AND ax.IsAdopted = TRUE
+                ) THEN 'Denied'
+                ELSE 'Pending'
+              END AS DecisionStatus
+            FROM AdoptionApplication a
+            INNER JOIN `User` u ON u.UserID = a.UserID
+            INNER JOIN Pet p ON p.PetID = a.PetID
+            INNER JOIN Employee e ON e.EmployeeID = @id
+            WHERE e.ShelterID IS NOT NULL
+              AND p.ShelterID = e.ShelterID
+              AND (
+                a.IsAdopted = TRUE
+                OR EXISTS (
+                  SELECT 1
+                  FROM AdoptionApplication ax
+                  WHERE ax.PetID = a.PetID AND ax.IsAdopted = TRUE
+                )
+              )
+            ORDER BY a.PetID, a.UserID
+            """;
+
+        try
+        {
+            await using var conn = _db.CreateConnection();
+            await conn.OpenAsync(cancellationToken);
+
+            int employeeId;
+            string employeeName;
+            int? shelterId;
+            await using (var cmd = new MySqlCommand(employeeSql, conn))
+            {
+                cmd.Parameters.AddWithValue("@id", staffId);
+                await using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
+                if (!await reader.ReadAsync(cancellationToken))
+                    return NotFound();
+                employeeId = reader.GetInt32(reader.GetOrdinal("EmployeeID"));
+                employeeName = reader.GetString(reader.GetOrdinal("EmployeeName"));
+                var shelterOrd = reader.GetOrdinal("ShelterID");
+                shelterId = reader.IsDBNull(shelterOrd) ? null : reader.GetInt32(shelterOrd);
+            }
+
+            var petsAdded = new List<StaffProfilePetDto>();
+            await using (var cmd = new MySqlCommand(petsSql, conn))
+            {
+                cmd.Parameters.AddWithValue("@id", staffId);
+                await using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
+                while (await reader.ReadAsync(cancellationToken))
+                {
+                    var shelterOrd = reader.GetOrdinal("ShelterId");
+                    var breedOrd = reader.GetOrdinal("PetBreed");
+                    petsAdded.Add(new StaffProfilePetDto(
+                        reader.GetInt32(reader.GetOrdinal("PetId")),
+                        reader.GetString(reader.GetOrdinal("PetName")),
+                        reader.GetString(reader.GetOrdinal("PetType")),
+                        reader.IsDBNull(breedOrd) ? null : reader.GetString(breedOrd),
+                        reader.IsDBNull(shelterOrd) ? null : reader.GetInt32(shelterOrd)));
+                }
+            }
+
+            var decisions = new List<StaffProfileDecisionDto>();
+            await using (var cmd = new MySqlCommand(decisionsSql, conn))
+            {
+                cmd.Parameters.AddWithValue("@id", staffId);
+                await using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
+                while (await reader.ReadAsync(cancellationToken))
+                {
+                    decisions.Add(new StaffProfileDecisionDto(
+                        reader.GetInt32(reader.GetOrdinal("UserId")),
+                        reader.GetString(reader.GetOrdinal("UserName")),
+                        reader.GetString(reader.GetOrdinal("UserEmail")),
+                        reader.GetInt32(reader.GetOrdinal("PetId")),
+                        reader.GetString(reader.GetOrdinal("PetName")),
+                        reader.GetBoolean(reader.GetOrdinal("IsAdopted")),
+                        reader.GetString(reader.GetOrdinal("DecisionStatus"))));
+                }
+            }
+
+            var accepted = decisions.Count((d) => d.IsAdopted);
+            var deniedOrPending = decisions.Count - accepted;
+            var dto = new StaffProfileDto(
+                employeeId,
+                employeeName,
+                shelterId,
+                petsAdded.Count,
+                accepted,
+                deniedOrPending,
+                petsAdded,
+                decisions);
+            return Ok(dto);
+        }
+        catch (MySqlException ex)
+        {
+            _logger.LogError(ex, "Staff profile load failed");
+            return Problem(detail: ex.Message, statusCode: StatusCodes.Status503ServiceUnavailable);
+        }
+    }
 }

@@ -82,6 +82,62 @@ public sealed class UsersController : ControllerBase
         }
     }
 
+    [HttpGet("{userId:int}/applications")]
+    public async Task<ActionResult<IReadOnlyList<UserApplicationDto>>> ListUserApplications(
+        int userId,
+        CancellationToken cancellationToken)
+    {
+        const string sql = """
+            SELECT
+              a.PetID AS PetId,
+              p.PetName,
+              p.PetType,
+              COALESCE(s.ShelterName, 'Shelter not set') AS ShelterName,
+              a.IsAdopted,
+              CASE
+                WHEN a.IsAdopted THEN 'Accepted'
+                WHEN EXISTS (
+                  SELECT 1
+                  FROM AdoptionApplication ax
+                  WHERE ax.PetID = a.PetID AND ax.IsAdopted = TRUE
+                ) THEN 'Denied'
+                ELSE 'Pending'
+              END AS ApplicationStatus
+            FROM AdoptionApplication a
+            INNER JOIN Pet p ON p.PetID = a.PetID
+            LEFT JOIN Shelter s ON s.ShelterID = p.ShelterID
+            WHERE a.UserID = @userId
+            ORDER BY a.PetID
+            """;
+
+        try
+        {
+            await using var conn = _db.CreateConnection();
+            await conn.OpenAsync(cancellationToken);
+            await using var cmd = new MySqlCommand(sql, conn);
+            cmd.Parameters.AddWithValue("@userId", userId);
+            await using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
+            var list = new List<UserApplicationDto>();
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                list.Add(new UserApplicationDto(
+                    reader.GetInt32(reader.GetOrdinal("PetId")),
+                    reader.GetString(reader.GetOrdinal("PetName")),
+                    reader.GetString(reader.GetOrdinal("PetType")),
+                    reader.GetString(reader.GetOrdinal("ShelterName")),
+                    reader.GetBoolean(reader.GetOrdinal("IsAdopted")),
+                    reader.GetString(reader.GetOrdinal("ApplicationStatus"))));
+            }
+
+            return Ok(list);
+        }
+        catch (MySqlException ex)
+        {
+            _logger.LogError(ex, "Database error loading applications for user {UserId}", userId);
+            return Problem(detail: ex.Message, statusCode: StatusCodes.Status503ServiceUnavailable);
+        }
+    }
+
     private static bool IsPlausibleEmail(string email)
     {
         try

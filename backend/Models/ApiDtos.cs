@@ -31,6 +31,13 @@ public sealed record SummaryDto(
 
 /// <summary>Matches the <c>User</c> table (JSON uses camelCase).</summary>
 public sealed record UserDto(int Id, string UserName, string UserEmail, string? TypePreference);
+public sealed record UserApplicationDto(
+    int PetId,
+    string PetName,
+    string PetType,
+    string ShelterName,
+    bool IsAdopted,
+    string ApplicationStatus);
 
 /// <summary>Staff session payload from <c>Employee</c> (no password).</summary>
 public sealed record EmployeeDto(int Id, string EmployeeName, int? ShelterId);
@@ -55,3 +62,26 @@ public sealed record StaffApplicationRowDto(
     int? ShelterId);
 
 public sealed record StaffShelterRowDto(int Id, string Name, string Address, int PetCount, int ApplicationCount);
+public sealed record StaffProfilePetDto(
+    int PetId,
+    string PetName,
+    string PetType,
+    string? PetBreed,
+    int? ShelterId);
+public sealed record StaffProfileDecisionDto(
+    int UserId,
+    string UserName,
+    string UserEmail,
+    int PetId,
+    string PetName,
+    bool IsAdopted,
+    string DecisionStatus);
+public sealed record StaffProfileDto(
+    int EmployeeId,
+    string EmployeeName,
+    int? ShelterId,
+    int PetsAddedCount,
+    int AcceptedCount,
+    int DeniedOrPendingCount,
+    IReadOnlyList<StaffProfilePetDto> PetsAdded,
+    IReadOnlyList<StaffProfileDecisionDto> Decisions);
